@@ -1,7 +1,6 @@
 import numpy as np
 import logging
 
-from src.clustering.cluster import Clustering
 from src.clustering.clustering import Clustering
 from scipy.cluster.hierarchy import linkage, fcluster
 from typing import Union, override
@@ -91,37 +90,3 @@ class HybridClustering(Clustering):
     @override
     def predict(self, X: np.ndarray) -> np.ndarray:
         raise NotImplementedError("Predict method not implemented for HybridCluster")
-
-
-    @staticmethod
-    def mahalanobis_distance(
-        cluster1: np.ndarray,
-        cluster2: np.ndarray,
-        strategy: str = 'pooled'
-    ) -> float:
-        """
-        Compute the Mahalanobis distance between two clusters
-        cluster1: numpy array of shape (n_samples, n_features) 
-        cluster2: numpy array of shape (n_samples, n_features)
-        strategy: 'pooled' or 'bidirectional'
-        """
-        centroid1 = np.mean(cluster1, axis=0)
-        centroid2 = np.mean(cluster2, axis=0)
-
-        if strategy == 'pooled':
-            pooled_cov = np.cov(np.concatenate([cluster1, cluster2], axis=0), rowvar=False)
-            pooled_cov_reg = pooled_cov + np.eye(pooled_cov.shape[0]) * 1e-6  # Regularize the covariance matrix to avoid singularity
-            inv_pooled_cov = np.linalg.inv(pooled_cov_reg)
-            diff = centroid1 - centroid2
-            return np.sqrt(np.dot(diff, np.dot(inv_pooled_cov, diff)))
-        
-        elif strategy == 'bidirectional':
-            inv_cov1 = np.linalg.inv(np.cov(cluster1, rowvar=False))
-            inv_cov2 = np.linalg.inv(np.cov(cluster2, rowvar=False))
-            diff = centroid1 - centroid2
-            dist1 = np.sqrt(np.dot(diff, np.dot(inv_cov1, diff)))
-            dist2 = np.sqrt(np.dot(-diff, np.dot(inv_cov2, -diff)))
-            return (dist1 + dist2) / 2
-        
-        else:
-            raise ValueError(f"Invalid strategy: {strategy}")
