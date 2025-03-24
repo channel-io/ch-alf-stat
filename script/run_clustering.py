@@ -12,7 +12,7 @@ dotenv.load_dotenv()
 
 from typing import Optional, List
 from src.log_handler import LogHandler
-from src.clustering.hybrid_cluster import HybridCluster
+from src.clustering import HybridClustering
 from src.embedder import EmbeddingExtractor
 from src.clustering.utils import reduce_dimensions
 
@@ -44,21 +44,21 @@ def main(
             X = reduce_dimensions(X, method="umap", n_components=64)
             torch.save(X, cache_dir)
         finally:
-            loop.close()
+            loop.close()    
 
     # Cluster dataset
-    hybrid_cluster = HybridCluster(
+    clustering = HybridClustering(
         X=X,
         texts=summaries
     )
-    hybrid_cluster.fit()
+    clustering.fit()
 
     import pdb; pdb.set_trace()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--logs_dir", type=str, required=True)
-    parser.add_argument("--subdirs", nargs="+", default=None)  # Remove type=list[str]
+    parser.add_argument("--subdirs", nargs="+", default=None)
     parser.add_argument("--start_date", type=str, default=None)
     parser.add_argument("--end_date", type=str, default=None)
     parser.add_argument("--cache_dir", type=str, default=None)

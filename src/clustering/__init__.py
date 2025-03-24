@@ -1,2 +1,2 @@
-from .cluster import Cluster
-from .hybrid_cluster import HybridCluster
+from .clustering import Clustering
+from .hybrid import HybridClustering

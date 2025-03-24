@@ -2,8 +2,7 @@ import numpy as np
 
 from abc import ABC, abstractmethod
 
-
-class Cluster(ABC):
+class Clustering(ABC):
     def __init__(
         self,
         X: np.ndarray,
