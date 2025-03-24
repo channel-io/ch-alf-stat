@@ -1,5 +1,6 @@
 [project]
-name = "python-boilerplate"
+name = "ch-alf-stat"
+authors = [{name="Day", email="day@channel.io"}]
 version = "0.1.0"
 description = ""
 readme = "README.md"
