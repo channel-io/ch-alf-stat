@@ -1,0 +1,45 @@
+import numpy as np
+
+from abc import ABC, abstractmethod
+
+
+class Cluster(ABC):
+    def __init__(
+        self,
+        X: np.ndarray,
+        texts: list[str],
+        random_state: int = 42,
+    ):
+        assert X.shape[0] == len(texts), "X and texts must have the same number of rows"
+        self.X = X
+        self.N = X.shape[0]
+        self.texts = texts
+        self.random_state = random_state
+
+    @abstractmethod
+    def fit(self):
+        """
+        Fit the clustering model to the data.
+        
+        This method trains the clustering model on the input data X and assigns
+        cluster labels to each data point. The implementation details depend on
+        the specific clustering algorithm used by the subclass.
+        """
+        pass
+
+    @abstractmethod
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """
+        Predict the cluster labels for new data.
+        
+        This method assigns cluster labels to new data points based on the
+        trained clustering model. The implementation details depend on the
+        specific clustering algorithm used by the subclass.
+
+        Args:
+            X: New data points to predict cluster labels for.
+
+        Returns:
+            np.ndarray: Predicted cluster labels for the new data points.
+        """
+        pass
