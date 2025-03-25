@@ -5,12 +5,12 @@ from typing import Optional
 
 class AlfFactCheck(BaseModel):
     is_fact: bool
-    critic: str
-    rubric: str
+    critic: Optional[list[str]] = None
+    rubric: Optional[list[str]] = None
 
 class AlfFunctionCall(BaseModel):
     name: str
-    parameters: dict
+    arguments: dict
 
 class AlfTurn(BaseModel):
     """
@@ -26,7 +26,7 @@ class AlfTurn(BaseModel):
     response_latency: Optional[float] = None
     response_type: str
     response: str
-    reference: list[str]
+    references: Optional[list[str]] = None
     sent: bool = False
     fact_check: Optional[AlfFactCheck] = None
     function_call: Optional[AlfFunctionCall] = None

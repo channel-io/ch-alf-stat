@@ -5,7 +5,7 @@ from logging import getLogger
 from tqdm import tqdm
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
-from src.model import AlfLog, AlfTurn
+from src.model import AlfLog, AlfTurn, AlfFactCheck, AlfFunctionCall
 from pymongo import MongoClient
 logger = getLogger(__name__)
 
@@ -127,6 +127,10 @@ class LogHandler:
                 time_out = None
                 response_latency = None
 
+            fact_check = None
+            references = None
+                
+            # KB chat
             if "generate_answer_with_knowledge" in item:
                 subitem = item["generate_answer_with_knowledge"]
                 if "request" not in subitem or "response" not in subitem:
@@ -144,8 +148,15 @@ class LogHandler:
                 response_type = subitem["response"]["type"]
                 response = subitem["response"]["message"]
                 if "references" in subitem["response"]:
-                    reference = [f"{r['type']}_{r['id']}" for r in subitem["response"]["references"]]
-            
+                    references = [f"{r['type']}_{r['id']}" for r in subitem["response"]["references"]]
+                if "fact_check" in item:
+                    fact_check = AlfFactCheck(
+                        is_fact=item["fact_check"]["response"]["is_fact"],
+                        critic=item["fact_check"]["response"]["critic"],
+                        rubric=item["fact_check"]["response"]["rubric"]
+                    )
+                    
+            # FC chat
             else:
                 subitem = item["generate_answer"]
                 if "request" not in subitem or "response" not in subitem:
@@ -154,6 +165,11 @@ class LogHandler:
                 with_knowledge = False
                 response_type = subitem["response"]["type"]
                 response = subitem["response"]["message"]
+
+            function_call = AlfFunctionCall(
+                name=item["function call"]["name"],
+                arguments=item["function call"]["arguments"]
+            )
             
             alf_turn = AlfTurn(
                 uid=uid,
@@ -165,7 +181,9 @@ class LogHandler:
                 with_knowledge=with_knowledge,
                 response_type=response_type,
                 response=response,
-                reference=reference,    
+                references=references,    
+                function_call=function_call,
+                fact_check=fact_check
             )
             raw_dataset[chat_id]["turns"].append(alf_turn)
 
