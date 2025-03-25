@@ -17,6 +17,8 @@ dependencies = [
     "umap-learn>=0.5.5",
     "nest-asyncio>=1.6.0",
     "torch>=2.6.0",
+    "bertopic>=0.17.0",
+    "pymongo>=4.11.3",
 ]
 
 [dependency-groups]

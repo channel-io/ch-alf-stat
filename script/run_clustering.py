@@ -26,7 +26,8 @@ def main(
 ):
     # Prepare dataset
     log_handler = LogHandler(logs_dir, subdirs, start_date, end_date)
-    summaries = [t["summary"] for t in log_handler.turns_kb]
+    turns_kb, _ = log_handler.split_data_by_response_type()
+    summaries = [t.summary for t in turns_kb]
     
     # Handle empty summaries case
     if not summaries:

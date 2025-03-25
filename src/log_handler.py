@@ -4,9 +4,11 @@ import json
 from logging import getLogger   
 from tqdm import tqdm
 from datetime import datetime, timedelta
-from typing import Optional, List
-
+from typing import Optional, List, Dict
+from src.model import AlfLog, AlfTurn
+from pymongo import MongoClient
 logger = getLogger(__name__)
+
 
 class LogHandler:
     """
@@ -17,31 +19,48 @@ class LogHandler:
         subdirs (Optional[List[str]]): List of subdirectories to include in the data loading process.
         start_date (Optional[str]): The start date for filtering logs. (Timestamp)
         end_date (Optional[str]): The end date for filtering logs. (Timestamp)
-
-    Terminology:
-        - "log": Raw log data (includes all information acquired from loki)
-        - "data": Preprocessed data (includes only necessary information, grouped by chat_id, consists of turns)
-        - "turn": Preprocessed data (not grouped by chat_id)
     """
     def __init__(
         self,
-        logs_dir: str,
+        logs_dir: Optional[str] = None,
         subdirs: Optional[List[str]] = None,
+        channel_id: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None
     ):
-        logger.info(f"Loading logs from {logs_dir}")
-        logger.info(f"Subdirs: {subdirs}")
+        if not (channel_id or logs_dir):
+            raise ValueError("Either one of channel_id or logs_dir must be provided")
+        if channel_id and not start_date:
+            raise ValueError("start_date must be provided if channel_id is provided")
+
+        self.channel_id = channel_id
         self.logs_dir = logs_dir
         self.subdirs = subdirs
-        self.start_date = datetime.strptime(start_date, "%Y-%m-%d %H:%M:%S.%f%z") if start_date else None
-        self.end_date = datetime.strptime(end_date, "%Y-%m-%d %H:%M:%S.%f%z") if end_date else None
-        self.logs = self.load_logs()  # raw data
-        self.chat_ids = self.get_chat_ids()
-        self.dataset = self.preprocess_data()  # preprocessed data
-        self.turns_kb, self.turns_fc = self.split_data_by_response_type()
+        self.start_date = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
+        self.end_date = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
+        self.raw_logs = self._load_logs()
+        self.chat_ids = self._get_chat_ids()
+        self.logs = self.preprocess_logs()
 
-    def load_logs(self):
+    def _load_logs(self):
+        if self.channel_id:
+            return self._load_logs_from_mongodb()
+        else:
+            return self._load_logs_from_local()
+    
+    def _load_logs_from_mongodb(self):
+        mongo_client = MongoClient(os.getenv("MONGO_URI"))
+        db = mongo_client["channel"]["alf_logs"]
+        logs = list(db.find({"channel_id": self.channel_id}))
+        if self.start_date:
+            logs = [log for log in logs if log["metadata"]["utc_time"] >= self.start_date]
+        if self.end_date:
+            logs = [log for log in logs if log["metadata"]["utc_time"] <= self.end_date]
+        logs.sort(key=lambda x: datetime.strptime(x["metadata"]["utc_time"], "%Y-%m-%d %H:%M:%S.%f%z"))
+        logger.info(f"Loaded {len(logs)} logs")
+        return logs
+
+    def _load_logs_from_local(self):
         logs = []
         for root, _, files in os.walk(self.logs_dir):
             if self.subdirs is not None:
@@ -59,13 +78,12 @@ class LogHandler:
         logger.info(f"Loaded {len(logs)} logs")
         return logs
 
-
-    def get_chat_ids(self):
+    def _get_chat_ids(self):
         """
         Get the chat_ids from the logs.
         """
         valid_data = []
-        for d in self.logs:
+        for d in self.raw_logs:
             if 'generate_answer_with_knowledge' in d:
                 valid_data.append(d['generate_answer_with_knowledge'])
             elif 'generate_answer' in d:
@@ -78,106 +96,119 @@ class LogHandler:
         return list(chat_ids)
     
 
-    def preprocess_data(self):
+    def preprocess_logs(self) -> List[AlfLog]:
         """
-        This function preprocesses the data by grouping it by chat_id and retaining only the necessary values.
+        This function preprocesses the data by grouping it by chat_id and converting it to AlfLog objects with AlfTurn items.
         
-        It iterates through the data logs and organizes them into a dataset dictionary where each key is a chat_id.
-        For each chat_id, it stores a list of turns (interactions) and feedback (initially set to None).
-        
-        Each turn contains:
-        - time_in: The time the interaction started.
-        - time_out: The time the interaction ended.
-        - response_latency: The latency of the response.
-        - query: The query made by the user.
-        - summary: A summary of the interaction.
-        - knowledge_based: A boolean indicating if the response was knowledge-based.
-        - response_type: The type of response.
-        - response_message: The message of the response.
-        - reference: A list of references (if any).
-        - uid: A unique identifier for the interaction.
-        - sent: A boolean indicating if the response was sent before the next interaction.
-
-        The function ensures that the turns for each chat_id are sorted by time_in and sets the 'sent' flag for each turn.
+        It iterates through the data logs and organizes them into a dataset dictionary where each key is a chat_id
+        and each value is an AlfLog object.
         """
-        dataset = {}
+        raw_dataset = {}
 
-        for item in self.logs:
+        for item in self.raw_logs:
             chat_id = item["generate_answer"]["request"]["chat_id"]
-            if chat_id not in dataset:
-                dataset[chat_id] = {"turns": [], "feedback": None}
+            if chat_id not in raw_dataset:
+                raw_dataset[chat_id] = {"turns": [], "feedback": None}
             
-            turn = {
-                "time_in": item["metadata"]["utc_time_in"],
-                "time_out": item["metadata"]["utc_time"],
-                "response_latency": item["metadata"]["response_latency"],
-            }
+            uid = item['metadata']['uid']
+            if "utc_time_in" in item['metadata']:
+                time_in = item['metadata']['utc_time_in']
+                time_out = item['metadata']['utc_time']
+                response_latency = item["metadata"]["response_latency"]
+                if isinstance(response_latency, str):
+                    try:
+                        latency_dt = datetime.strptime(response_latency, "%H:%M:%S.%f")
+                        response_latency = latency_dt.hour * 3600 + latency_dt.minute * 60 + latency_dt.second + latency_dt.microsecond / 1000000
+                    except ValueError:
+                        logger.warning(f"Could not parse response_latency: {response_latency}")
+                        response_latency = None
+            else:
+                time_in = item['metadata']['utc_time']
+                time_out = None
+                response_latency = None
 
             if "generate_answer_with_knowledge" in item:
                 subitem = item["generate_answer_with_knowledge"]
                 if "request" not in subitem or "response" not in subitem:
                     continue
-                turn["query"] = subitem["request"]["queries"][-1]
-                if not turn["query"]:
+                query = subitem["request"]["queries"][-1]
+                if not query:
                     if subitem["request"]["messages"][-1]["plainText"]:
-                        turn["query"] = subitem["request"]["messages"][-1]["plainText"]
+                        query = subitem["request"]["messages"][-1]["plainText"]
                     elif subitem["request"]["messages"][-1]["files"]:
-                        turn["query"] = "Image input"
+                        query = "Image input"
                     else:
-                        turn["query"] = "Unknown input"
-                turn["summary"] = subitem["request"]["summary"]
-                turn["knowledge_based"] = True
-                turn["response_type"] = subitem["response"]["type"]
-                turn["response_message"] = subitem["response"]["message"]
+                        query = "Unknown input"
+                summary = subitem["request"]["summary"]
+                with_knowledge = True
+                response_type = subitem["response"]["type"]
+                response = subitem["response"]["message"]
                 if "references" in subitem["response"]:
-                    turn["reference"] = [f"{r['type']}_{r['id']}" for r in subitem["response"]["references"]]
+                    reference = [f"{r['type']}_{r['id']}" for r in subitem["response"]["references"]]
             
             else:
                 subitem = item["generate_answer"]
                 if "request" not in subitem or "response" not in subitem:
                     continue
-                turn["query"] = subitem["request"]["messages"][-1]["plainText"]
-                turn["knowledge_based"] = False
-                turn["response_type"] = subitem["response"]["type"]
-                turn["response_message"] = subitem["response"]["message"]
+                query = subitem["request"]["messages"][-1]["plainText"]
+                with_knowledge = False
+                response_type = subitem["response"]["type"]
+                response = subitem["response"]["message"]
+            
+            alf_turn = AlfTurn(
+                uid=uid,
+                time_in=time_in,
+                time_out=time_out,
+                response_latency=response_latency,
+                query=query,
+                summary=summary,
+                with_knowledge=with_knowledge,
+                response_type=response_type,
+                response=response,
+                reference=reference,    
+            )
+            raw_dataset[chat_id]["turns"].append(alf_turn)
 
-            turn['uid'] = item['metadata']['uid']
-            dataset[chat_id]["turns"].append(turn)
-            dataset[chat_id]["final_response_type"] = subitem["response"]["type"]
+        # Sort turns by time_in and determine if they were sent to the user
+        if not self.channel_id:
+            for _, chat_data in raw_dataset.items():
+                chat_data["turns"].sort(key=lambda x: x.time_in)
+                for i, turn in enumerate(chat_data["turns"]):
+                    turn.sent = all(turn.time_out <= next_turn.time_in for next_turn in chat_data["turns"][i+1:])
 
-        for chat_id, chat_data in dataset.items():
-            chat_data["turns"].sort(key=lambda x: x["time_in"])
-            for i, turn in enumerate(chat_data["turns"]):
-                turn["sent"] = all(turn["time_out"] <= next_turn["time_in"] for next_turn in chat_data["turns"][i+1:])
-
-        return dataset
-    
-
-    def get_final_response_type(self):
-        """
-        Get the final response type from the dataset.
-        """
-        final_chat_types = {}
-        for chat_id, chat_data in self.dataset.items():
-            if chat_data['turns'][-1]['response_type'] not in final_chat_types:
-                final_chat_types[chat_data['turns'][-1]['response_type']] = 0
-            final_chat_types[chat_data['turns'][-1]['response_type']] += 1
-        return final_chat_types
+        # Convert to AlfLog and AlfTurn models
+        processed_dataset = []
+        for chat_id, chat_data in raw_dataset.items():
+            channel_id = self.channel_id or "local"
+            alf_log = AlfLog(
+                channel_id=channel_id,
+                chat_id=chat_id,
+                turns=chat_data["turns"]
+            )
+            processed_dataset.append(alf_log)
+            
+        return processed_dataset
 
 
     def split_data_by_response_type(self):
         """
         Split the dataset into knowledge-based and function-call datasets.
         """
-        turns = []
-        for _, chat_data in self.dataset.items():
-            for turn in chat_data["turns"]:
-                if turn["sent"]:  # Filter out responses that are not sent to user
-                    turns.append(turn)
-        turns = sorted(turns, key=lambda x: x["time_in"])
-        dataset_kb = [t for t in turns if t["knowledge_based"]]
-        dataset_fc = [t for t in turns if not t["knowledge_based"]]
-        return dataset_kb, dataset_fc
+        turns_kb = []
+        turns_fc = []
+        
+        for alf_log in self.logs:
+            for turn in alf_log.turns:
+                if turn.sent:  # Filter out responses that are not sent to user
+                    if turn.with_knowledge:
+                        turns_kb.append(turn)
+                    else:
+                        turns_fc.append(turn)
+                        
+        turns_kb.sort(key=lambda x: x.time_in)
+        turns_fc.sort(key=lambda x: x.time_in)
+        
+        return turns_kb, turns_fc
     
 
     def get_unsatisfied_chats(self):
@@ -188,13 +219,16 @@ class LogHandler:
         - Handed to human within 24 hours.
         """
         unsatisfied_chats = set()
-        for chat_id, chat_data in self.dataset.items():
-            if chat_data['turns'][-1]['response_type'] == 'open_chat':
-                for turn in chat_data['turns']:
-                    if turn['sent'] and turn['response_type'] in ['faq', 'rag']:
-                        if datetime.strptime(chat_data['turns'][-1]['time_in'], "%Y-%m-%d %H:%M:%S.%f%z") - datetime.strptime(turn['time_in'], "%Y-%m-%d %H:%M:%S.%f%z") < timedelta(hours=24):
+        for chat_id, alf_log in self.dataset.items():
+            turns = alf_log.turns
+            if turns and turns[-1].response_type == 'open_chat':
+                for turn in turns:
+                    if turn.sent and turn.response_type in ['faq', 'rag']:
+                        if datetime.strptime(turns[-1].time_in, "%Y-%m-%d %H:%M:%S.%f%z") - datetime.strptime(turn.time_in, "%Y-%m-%d %H:%M:%S.%f%z") < timedelta(hours=24):
                             unsatisfied_chats.add(chat_id)
-        unsatisfied_chats = {k: v for k, v in self.dataset.items() if k in unsatisfied_chats}
-        logger.info(f"Number of unsatisfied chats: {len(unsatisfied_chats)}")
-        return unsatisfied_chats
+                            break
+                            
+        unsatisfied_logs = {k: v for k, v in self.dataset.items() if k in unsatisfied_chats}
+        logger.info(f"Number of unsatisfied chats: {len(unsatisfied_logs)}")
+        return unsatisfied_logs
     
