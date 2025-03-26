@@ -1,6 +1,15 @@
 import numpy as np
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+
+@dataclass
+class Cluster:
+    id: int
+    data: np.ndarray
+    texts: list[str]
+
 
 class Clustering(ABC):
     def __init__(
@@ -16,7 +25,7 @@ class Clustering(ABC):
         self.random_state = random_state
 
     @abstractmethod
-    def fit(self):
+    def fit(self) -> list[Cluster]:
         """
         Fit the clustering model to the data.
         

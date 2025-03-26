@@ -1,11 +1,33 @@
 import numpy as np
 import logging
 
-from src.clustering.clustering import Clustering
-from scipy.cluster.hierarchy import linkage, fcluster
-from typing import Union, override
+from src.clustering.clustering import Clustering, Cluster
+from scipy.cluster.hierarchy import linkage, to_tree, ClusterNode
+from typing import Union, override, Optional
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
+
+
+class HybridNode(ClusterNode):
+    def __init__(
+        self,
+        node: ClusterNode,
+        labels: Optional[np.ndarray] = None,
+    ):
+        super().__init__(node.id, node.left, node.right, node.dist, node.count)
+        self.labels = labels
+        
+        # No longer storing the actual data, just references
+        self.cov = None
+        self.mean = None
+    
+    def compute_stats(self, X: np.ndarray):
+        """Compute covariance and mean using the data indexed by labels"""
+        if self.labels is not None and len(self.labels) > 0:
+            data = X[self.labels]
+            self.cov = np.cov(data, rowvar=False)
+            self.mean = np.mean(data, axis=0)
 
 
 class HybridClustering(Clustering):
@@ -34,59 +56,152 @@ class HybridClustering(Clustering):
         logger.info(f"Hybrid clustering initialized with {self.N} samples")
 
 
-    def _initial_clustering(self, t_fine: Union[float, int] = 0.5):
-        logger.info("Initializing clusters")
-
-        # Initial cutoff of hierarchical tree
-        # If t_fine is integer (t_fine > 1), then it is the number of clusters
-        # If t_fine is float (0 < t_fine < 1), then it is the distance threshold
-        if t_fine > 1:
-            initial_labels = fcluster(self.Z, t_fine, criterion='maxclust')
-        else:
-            initial_labels = fcluster(self.Z, t_fine, criterion='distance')
-
-        # Build a mapping from cluster label to the list of sample indices in that cluster.
-        cluster_indices = {}
-        for idx, label in enumerate(initial_labels):
-            if label not in cluster_indices:
-                cluster_indices[label] = [idx]
-            else:
-                cluster_indices[label].append(idx)
-
-        noise_clusters = [c for c in cluster_indices.keys() if len(cluster_indices[c]) > self.noise_threshold]
-        logger.info(f"Found {len(noise_clusters)} noise clusters (less than {self.noise_threshold} samples)")
-
-        self.labels = initial_labels
-        self.clusters = cluster_indices
-        self.parent_map = self._get_parent_map()
-
-    def _get_parent_map(self):
-        logger.info("Mapping parent labels")
-        parent_map = {}
-        for i, (child1, child2, _, _) in enumerate(self.Z):
-            new_cluster = self.N + i  # new cluster index
-            parent_map[int(child1)] = new_cluster
-            parent_map[int(child2)] = new_cluster
-        
-        # Filter parent_map to only include child-parent mapping for labels in self.labels
-        # Filter parent_map to include labels in self.labels or new clusters (label > self.N)
-        filtered_parent_map = {}
-        for label in parent_map:
-            if label in np.unique(self.labels) or label >= self.N:
-                filtered_parent_map[label] = parent_map[label]
-        
-        parent_map = filtered_parent_map
-        return parent_map
-        
-    def _refine_clusters(self, t_distance: float = 2.0):
-        pass
-
     @override
-    def fit(self):
-        self._initial_clustering(t_fine=0.5)
-        self._refine_clusters()
+    def fit(self, t_dist: float = 0.5, t_merge: float = 0.5) -> list[Cluster]:
+        root, _ = to_tree(self.Z, rd=True)
+
+        hybrid_nodes = {}
+        self.pruned = {"dist": 0, "merge": 0}
+        
+        def convert_node(node):
+            if node is None:
+                return None, None
+            
+            if node.id in hybrid_nodes:
+                hybrid_node = hybrid_nodes[node.id]
+                return hybrid_node, hybrid_node.labels if hybrid_node else None
+
+            if node.is_leaf():
+                labels = np.array([node.id])
+                hybrid_node = HybridNode(node, labels)
+                hybrid_node.compute_stats(self.X)
+                hybrid_nodes[node.id] = hybrid_node
+                return hybrid_node, labels
+            
+            left_hybrid, left_labels = convert_node(node.left)
+            right_hybrid, right_labels = convert_node(node.right)
+                        
+            if left_labels is not None and right_labels is not None:
+                labels = np.concatenate([left_labels, right_labels])
+            elif left_labels is not None:
+                labels = left_labels
+            elif right_labels is not None:
+                labels = right_labels
+            else:
+                labels = None
+
+            # Check if both child nodes exist and should be merged based on Mahalanobis distance
+            if left_hybrid is not None and right_hybrid is not None:
+                if left_hybrid.labels is not None and right_hybrid.labels is not None:
+                    left_data = self.X[left_hybrid.labels]
+                    right_data = self.X[right_hybrid.labels]
+                    
+                    maha_dist = self.general_mahalanobis(
+                        left_data, 
+                        right_data, 
+                        strategy='pooled'
+                    )
+                    
+                    # If the distance is below threshold, merge them by making them None
+                    if maha_dist < t_merge:
+                        hybrid_nodes[left_hybrid.id] = None
+                        hybrid_nodes[right_hybrid.id] = None
+                        left_hybrid = None
+                        right_hybrid = None
+                        self.pruned["dist"] += 1
+
+            hybrid_node = HybridNode(node, labels)
+            hybrid_node.compute_stats(self.X)
+            
+            # Check if this node should be pruned based on distance threshold
+            if node.dist < t_dist:
+                hybrid_nodes[node.id] = None
+                self.pruned["merge"] += 1
+                return None, labels
+            
+            hybrid_nodes[node.id] = hybrid_node
+            hybrid_node.left = left_hybrid
+            hybrid_node.right = right_hybrid
+            
+            return hybrid_node, labels
+        
+        hybrid_root, _ = convert_node(root)
+        
+        self.root = hybrid_root
+        self.nodes = hybrid_nodes
+
+        clusters = []
+
+        def count_leaf_nodes(node):
+            if node is None:
+                return 0
+            
+            if node.left is None and node.right is None:
+                data = self.X[node.labels]
+                texts = [self.texts[idx] for idx in node.labels]
+                clusters.append(Cluster(id=node.id, data=data, texts=texts))
+                return 1
+            
+            return count_leaf_nodes(node.left) + count_leaf_nodes(node.right)
+        
+        self.num_leaves = count_leaf_nodes(self.root)
+        logger.info(f"Hybrid clustering created with {self.num_leaves} leaf nodes")
+        
+        return clusters
 
 
     @override
     def predict(self, X: np.ndarray) -> np.ndarray:
         raise NotImplementedError("Predict method not implemented for HybridCluster")
+
+
+    @staticmethod
+    def compute_shrinkage_lambda(cov, n_samples, shrinkage_strength=0.5):
+        d = cov.shape[0]
+        sample_penalty = np.exp(- (n_samples / (d + 1)))
+        cond_penalty = np.tanh(np.log10(np.linalg.cond(cov)))
+        lam = shrinkage_strength * (sample_penalty + cond_penalty) / 2.0
+        lam = np.clip(lam, 0.0, 1.0)
+        return lam
+
+
+    @staticmethod
+    def interpolated_mahalanobis(
+        cov: np.ndarray,
+        diff: np.ndarray,
+        n_samples: int,
+        shrinkage_strength: float = 0.5
+    ) -> float:
+        lam = HybridClustering.compute_shrinkage_lambda(cov, n_samples, shrinkage_strength)
+        blended_cov = lam * cov + (1 - lam) * np.eye(cov.shape[0])
+        return np.sqrt(np.dot(diff, np.dot(np.linalg.inv(blended_cov), diff)))
+
+
+    @staticmethod
+    def general_mahalanobis(
+        cluster1: np.ndarray,
+        cluster2: np.ndarray,
+        strategy: str = 'pooled',
+        shrinkage_strength: float = 0.5
+    ) -> float:
+        """
+        Compute the Mahalanobis distance between two clusters
+        """
+        centroid1 = np.mean(cluster1, axis=0)
+        centroid2 = np.mean(cluster2, axis=0)
+
+        if strategy == 'pooled':
+            pooled_cov = np.cov(np.concatenate([cluster1, cluster2], axis=0), rowvar=False)
+            diff = centroid1 - centroid2
+            return HybridClustering.interpolated_mahalanobis(pooled_cov, diff, len(cluster1) + len(cluster2), shrinkage_strength)
+        
+        elif strategy == 'bidirectional':
+            diff = centroid1 - centroid2
+            cov1 = np.cov(cluster1, rowvar=False)
+            cov2 = np.cov(cluster2, rowvar=False)
+            dist1 = HybridClustering.interpolated_mahalanobis(cov1, diff, len(cluster1), shrinkage_strength)
+            dist2 = HybridClustering.interpolated_mahalanobis(cov2, -diff, len(cluster2), shrinkage_strength)
+            return (dist1 + dist2) / 2
+        
+        else:
+            raise ValueError(f"Invalid strategy: {strategy}")

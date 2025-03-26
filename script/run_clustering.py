@@ -52,9 +52,8 @@ def main(
         X=X,
         texts=summaries
     )
-    clustering.fit()
+    clusters = clustering.fit()
 
-    import pdb; pdb.set_trace()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
