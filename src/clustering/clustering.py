@@ -9,6 +9,19 @@ class Cluster:
     id: int
     data: np.ndarray
     texts: list[str]
+    count: int
+    
+    def sort(self):
+        # Sort data based on the distance to the centroid
+        centroid = np.mean(self.data, axis=0)
+        distances = np.linalg.norm(self.data - centroid, axis=1)
+        sorted_indices = np.argsort(distances)
+        self.data = self.data[sorted_indices]
+        self.texts = [self.texts[i] for i in sorted_indices]
+
+    def __repr__(self):
+        samples = "\n".join(self.texts[:10])
+        return f"Cluster(id={self.id}, count={self.count})\nTop 10 samples:\n{samples}\n"
 
 
 class Clustering(ABC):

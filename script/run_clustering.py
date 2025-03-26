@@ -52,7 +52,7 @@ def main(
         X=X,
         texts=summaries
     )
-    clusters = clustering.fit()
+    clustering.fit(t_merge=0.7)
 
 
 if __name__ == "__main__":

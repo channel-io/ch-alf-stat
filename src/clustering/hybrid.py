@@ -130,7 +130,7 @@ class HybridClustering(Clustering):
         self.root = hybrid_root
         self.nodes = hybrid_nodes
 
-        clusters = []
+        self.clusters = []
 
         def count_leaf_nodes(node):
             if node is None:
@@ -139,20 +139,26 @@ class HybridClustering(Clustering):
             if node.left is None and node.right is None:
                 data = self.X[node.labels]
                 texts = [self.texts[idx] for idx in node.labels]
-                clusters.append(Cluster(id=node.id, data=data, texts=texts))
+                cluster = Cluster(id=node.id, data=data, texts=texts, count=len(node.labels))
+                self.clusters.append(cluster)
                 return 1
             
             return count_leaf_nodes(node.left) + count_leaf_nodes(node.right)
         
         self.num_leaves = count_leaf_nodes(self.root)
         logger.info(f"Hybrid clustering created with {self.num_leaves} leaf nodes")
-        
-        return clusters
+
+        return self.clusters
 
 
     @override
     def predict(self, X: np.ndarray) -> np.ndarray:
         raise NotImplementedError("Predict method not implemented for HybridCluster")
+    
+    def sort(self):
+        self.clusters.sort(key=lambda x: x.count, reverse=True)  # Sort by count, largest first
+        for cluster in self.clusters:
+            cluster.sort()
 
 
     @staticmethod
