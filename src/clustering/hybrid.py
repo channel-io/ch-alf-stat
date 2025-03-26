@@ -139,7 +139,7 @@ class HybridClustering(Clustering):
             if node.left is None and node.right is None:
                 data = self.X[node.labels]
                 texts = [self.texts[idx] for idx in node.labels]
-                cluster = Cluster(id=node.id, data=data, texts=texts, count=len(node.labels))
+                cluster = Cluster(id=node.id, data=data, texts=texts, count=len(node.labels), indices=node.labels)
                 self.clusters.append(cluster)
                 return 1
             

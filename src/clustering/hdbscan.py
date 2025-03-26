@@ -78,7 +78,8 @@ class HdbscanClustering(Clustering):
                 id=int(label),
                 data=cluster_data,
                 texts=cluster_texts,
-                count=len(cluster_data)
+                count=len(cluster_data),
+                indices=np.where(mask)[0]
             )
             cluster.sort()  # Sort the cluster data by distance to centroid
             self.clusters.append(cluster)

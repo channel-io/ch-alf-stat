@@ -7,6 +7,7 @@ from dataclasses import dataclass
 @dataclass
 class Cluster:
     id: int
+    indices: list[int]
     data: np.ndarray
     texts: list[str]
     count: int
@@ -18,7 +19,8 @@ class Cluster:
         sorted_indices = np.argsort(distances)
         self.data = self.data[sorted_indices]
         self.texts = [self.texts[i] for i in sorted_indices]
-
+        self.indices = [self.indices[i] for i in sorted_indices]
+        
     def __repr__(self):
         samples = "\n".join(self.texts[:10])
         return f"Cluster(id={self.id}, count={self.count})\nTop 10 samples:\n{samples}\n"
