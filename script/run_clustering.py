@@ -26,8 +26,8 @@ def main(
 ):
     # Prepare dataset
     log_handler = LogHandler(logs_dir, subdirs, start_date, end_date)
-    turns_kb, _ = log_handler.split_data_by_response_type()
-    summaries = [t.summary for t in turns_kb]
+    logs = [t for t in log_handler.logs if t.with_knowledge and t.sent]
+    summaries = [t.summary for t in logs]
     
     # Handle empty summaries case
     if not summaries:
@@ -50,9 +50,11 @@ def main(
     # Cluster dataset
     clustering = HdbscanClustering(
         X=X,
-        texts=summaries
+        logs=logs
     )
     clusters = clustering.fit()
+
+    print(f"Found {len(clusters)} clusters")
 
 
 if __name__ == "__main__":

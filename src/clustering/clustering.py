@@ -2,7 +2,7 @@ import numpy as np
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-
+from src.model import ALFLog
 
 @dataclass
 class Cluster:
@@ -10,6 +10,7 @@ class Cluster:
     indices: list[int]
     data: np.ndarray
     texts: list[str]
+    logs: list[ALFLog]
     count: int
     
     def sort(self):
@@ -30,13 +31,14 @@ class Clustering(ABC):
     def __init__(
         self,
         X: np.ndarray,
-        texts: list[str],
+        logs: list[ALFLog],
         random_state: int = 42,
     ):
-        assert X.shape[0] == len(texts), "X and texts must have the same number of rows"
+        assert X.shape[0] == len(logs), "X and logs must have the same number of rows"
         self.X = X
         self.N = X.shape[0]
-        self.texts = texts
+        self.logs = logs
+        self.texts = [log.summary for log in logs]
         self.random_state = random_state
 
     @abstractmethod

@@ -2,14 +2,14 @@ import numpy as np
 import hdbscan
 
 from .clustering import Clustering, Cluster
-from typing import Optional, List, Dict, Any
-
+from typing import Optional
+from src.model import ALFLog
 
 class HdbscanClustering(Clustering):
     def __init__(
         self,
         X: np.ndarray,
-        texts: list[str],
+        logs: list[ALFLog],
         min_cluster_size: int = 5,
         min_samples: Optional[int] = None,
         metric: str = "euclidean",
@@ -32,7 +32,7 @@ class HdbscanClustering(Clustering):
             random_state: Random seed for reproducibility
             **kwargs: Additional arguments to pass to the HDBSCAN constructor
         """
-        super().__init__(X, texts, random_state)
+        super().__init__(X, logs, random_state)
         self.min_cluster_size = min_cluster_size
         self.min_samples = min_samples if min_samples is not None else min_cluster_size
         self.metric = metric
@@ -73,11 +73,13 @@ class HdbscanClustering(Clustering):
             mask = self.labels_ == label
             cluster_data = self.X[mask]
             cluster_texts = [self.texts[i] for i, is_member in enumerate(mask) if is_member]
-            
+            cluster_logs = [self.logs[i] for i, is_member in enumerate(mask) if is_member]
+
             cluster = Cluster(
                 id=int(label),
                 data=cluster_data,
                 texts=cluster_texts,
+                logs=cluster_logs,
                 count=len(cluster_data),
                 indices=np.where(mask)[0]
             )
