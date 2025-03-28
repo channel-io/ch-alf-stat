@@ -12,7 +12,7 @@ dotenv.load_dotenv()
 
 from typing import Optional, List
 from src.log_handler import LogHandler
-from src.clustering import HybridClustering
+from src.clustering import *
 from src.embedder import EmbeddingExtractor
 from src.clustering.utils import reduce_dimensions
 
@@ -48,11 +48,11 @@ def main(
             loop.close()    
 
     # Cluster dataset
-    clustering = HybridClustering(
+    clustering = HdbscanClustering(
         X=X,
         texts=summaries
     )
-    clustering.fit(t_merge=0.7)
+    clusters = clustering.fit()
 
 
 if __name__ == "__main__":
