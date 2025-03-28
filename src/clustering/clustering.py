@@ -2,13 +2,15 @@ import numpy as np
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-
+from src.model import ALFLog
 
 @dataclass
 class Cluster:
     id: int
+    indices: list[int]
     data: np.ndarray
     texts: list[str]
+    logs: list[ALFLog]
     count: int
     
     def sort(self):
@@ -18,7 +20,8 @@ class Cluster:
         sorted_indices = np.argsort(distances)
         self.data = self.data[sorted_indices]
         self.texts = [self.texts[i] for i in sorted_indices]
-
+        self.indices = [self.indices[i] for i in sorted_indices]
+        
     def __repr__(self):
         samples = "\n".join(self.texts[:10])
         return f"Cluster(id={self.id}, count={self.count})\nTop 10 samples:\n{samples}\n"
@@ -28,13 +31,14 @@ class Clustering(ABC):
     def __init__(
         self,
         X: np.ndarray,
-        texts: list[str],
+        logs: list[ALFLog],
         random_state: int = 42,
     ):
-        assert X.shape[0] == len(texts), "X and texts must have the same number of rows"
+        assert X.shape[0] == len(logs), "X and logs must have the same number of rows"
         self.X = X
         self.N = X.shape[0]
-        self.texts = texts
+        self.logs = logs
+        self.texts = [log.summary for log in logs]
         self.random_state = random_state
 
     @abstractmethod

@@ -3,8 +3,8 @@ import logging
 
 from src.clustering.clustering import Clustering, Cluster
 from scipy.cluster.hierarchy import linkage, to_tree, ClusterNode
-from typing import Union, override, Optional
-from tqdm import tqdm
+from typing import override, Optional
+from src.model import ALFLog
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +46,11 @@ class HybridClustering(Clustering):
     def __init__(
         self, 
         X: np.ndarray,
-        texts: list[str],
+        logs: list[ALFLog],
         random_state: int = 42,
         noise_threshold: int = 10,
     ):
-        super().__init__(X, texts, random_state)
+        super().__init__(X, logs, random_state)
         self.noise_threshold = noise_threshold
         self.Z = linkage(self.X, method='ward')
         logger.info(f"Hybrid clustering initialized with {self.N} samples")
@@ -139,7 +139,8 @@ class HybridClustering(Clustering):
             if node.left is None and node.right is None:
                 data = self.X[node.labels]
                 texts = [self.texts[idx] for idx in node.labels]
-                cluster = Cluster(id=node.id, data=data, texts=texts, count=len(node.labels))
+                logs = [self.logs[idx] for idx in node.labels]
+                cluster = Cluster(id=node.id, data=data, texts=texts, logs=logs, count=len(node.labels), indices=node.labels)
                 self.clusters.append(cluster)
                 return 1
             

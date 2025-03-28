@@ -12,7 +12,7 @@ dotenv.load_dotenv()
 
 from typing import Optional, List
 from src.log_handler import LogHandler
-from src.clustering import HybridClustering
+from src.clustering import *
 from src.embedder import EmbeddingExtractor
 from src.clustering.utils import reduce_dimensions
 
@@ -26,8 +26,8 @@ def main(
 ):
     # Prepare dataset
     log_handler = LogHandler(logs_dir, subdirs, start_date, end_date)
-    turns_kb, _ = log_handler.split_data_by_response_type()
-    summaries = [t.summary for t in turns_kb]
+    logs = [t for t in log_handler.logs if t.with_knowledge and t.sent]
+    summaries = [t.summary for t in logs]
     
     # Handle empty summaries case
     if not summaries:
@@ -48,11 +48,13 @@ def main(
             loop.close()    
 
     # Cluster dataset
-    clustering = HybridClustering(
+    clustering = HdbscanClustering(
         X=X,
-        texts=summaries
+        logs=logs
     )
-    clustering.fit(t_merge=0.7)
+    clusters = clustering.fit()
+
+    print(f"Found {len(clusters)} clusters")
 
 
 if __name__ == "__main__":
