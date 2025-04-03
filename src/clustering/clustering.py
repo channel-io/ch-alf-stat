@@ -1,5 +1,5 @@
 import numpy as np
-
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from src.model import ALFLog
@@ -68,3 +68,16 @@ class Clustering(ABC):
             np.ndarray: Predicted cluster labels for the new data points.
         """
         pass
+
+    @staticmethod
+    def save_clusters(clusters: list[Cluster], path: str):
+        assert path.endswith(".json"), "Path must end with .json"
+        cluster_dict = []
+        for cluster in clusters:
+            cluster_dict.append({
+                "id": cluster.id,
+                "count": cluster.count,
+                "texts": cluster.texts,
+            })
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cluster_dict, f, ensure_ascii=False, indent=4)
