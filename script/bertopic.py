@@ -1,13 +1,12 @@
 import argparse
 import numpy as np
 from bertopic import BERTopic
-
+import json
 from src.log_handler import LogHandler
 from src.embedder import EmbeddingExtractor
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.decomposition import IncrementalPCA
-from bertopic.vectorizers import OnlineCountVectorizer
-
+from bertopic.vectorizers import OnlineCountVectorizer, ClassTfidfTransformer
 from river import stream
 from river import cluster
 
@@ -42,42 +41,54 @@ def main():
         args.start_date, 
         args.end_date
     )
-    logs = [t for t in log_handler.logs if t.with_knowledge and t.sent]
-    summaries = [t.summary for t in logs]
+    log_handler.detect_language()
+    logs = [t for t in log_handler.logs if t.with_knowledge and t.sent and t.language == "ko"]
 
     # Prepare sub-models that support online learning
     umap_model = IncrementalPCA(n_components=32)
-    cluster_model = River(cluster.DBSTREAM())
+    cluster_model = River(cluster.DBSTREAM(clustering_threshold=0.5))
     vectorizer_model = OnlineCountVectorizer(stop_words="english", decay=.01)
+    ctfidf_model = ClassTfidfTransformer(reduce_frequent_words=True, bm25_weighting=True)
 
     topic_model = BERTopic(
         language="multilingual",
         umap_model=umap_model,
-        hdbscan_model=MiniBatchKMeans(n_clusters=100, random_state=0),
-        vectorizer_model=vectorizer_model
+        hdbscan_model=cluster_model,
+        vectorizer_model=vectorizer_model,
+        ctfidf_model=ctfidf_model
     )
 
-    # Incrementally fit the topic model by training on 1000 summaries at a time
-    batch_size = 1000
-    for index in range(0, len(summaries), batch_size):
-        batch = summaries[index:index + batch_size]
-        embeddings = EmbeddingExtractor.get_embeddings(batch).astype(np.float64)
-        print(f"Processing batch {index // batch_size + 1}/{(len(summaries) + batch_size - 1) // batch_size}: {len(batch)} summaries")
-        topic_model.partial_fit(batch, embeddings)
-        # Get topics and their representations
-        topic_model.get_topic(0)
+    # Group logs by week and incrementally fit the topic model
+    from datetime import datetime, timedelta
+    
+    # Sort logs by time
+    logs_with_time = [(log, datetime.fromisoformat(log.time_out.split('.')[0])) for log in logs]
+    logs_with_time.sort(key=lambda x: x[1])
+    
+    # Group by week
+    weekly_batches = {}
+    for log, log_time in logs_with_time:
+        # Get the start of the week (Monday)
+        week_start = log_time - timedelta(days=log_time.weekday())
+        week_key = week_start.strftime('%Y-%m-%d')
         
+        if week_key not in weekly_batches:
+            weekly_batches[week_key] = []
+        weekly_batches[week_key].append(log.summary)
     
-    # Print topic information
-    topic_info = topic_model.get_topic_info()
-    print("\nTopic Information:")
-    print(topic_info)
-    
-    # Print top topics
-    print("\nTop Topics:")
-    for topic_id in topic_info.head(10)["Topic"]:
-        if topic_id != -1:  # Skip outlier topic
-            print(f"Topic {topic_id}: {topic_model.get_topic(topic_id)}")
+    # Process each week
+    weekly_topics = []
+    for i, (week_key, batch) in enumerate(weekly_batches.items()):
+        print(f"Processing week {i+1}/{len(weekly_batches)}: {week_key} with {len(batch)} summaries")
+        embeddings = EmbeddingExtractor.get_embeddings(batch).astype(np.float64)
+        topic_model.partial_fit(batch, embeddings)
+        
+        # Get topics and their representations
+        weekly_topics.append(topic_model.get_topic_info().to_dict())
+
+    # Save topics
+    with open("script/weekly_topics.json", "w", encoding="utf-8") as f:
+        json.dump(weekly_topics, f, ensure_ascii=False, indent=4)
 
 if __name__ == "__main__":
     main()
