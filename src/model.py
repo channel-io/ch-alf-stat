@@ -3,16 +3,16 @@ from pydantic import BaseModel
 from typing import Optional
 
 
-class AlfFactCheck(BaseModel):
+class ALFFactCheck(BaseModel):
     is_fact: bool
     critic: Optional[list[str]] = None
     rubric: Optional[list[str]] = None
 
-class AlfFunctionCall(BaseModel):
+class ALFFunctionCall(BaseModel):
     name: str
     arguments: dict
 
-class AlfTurn(BaseModel):
+class ALFLog(BaseModel):
     """
     A turn is a single interaction between a user and a bot.
     Determined by UID
@@ -28,15 +28,16 @@ class AlfTurn(BaseModel):
     response: str
     references: Optional[list[str]] = None
     sent: bool = False
-    fact_check: Optional[AlfFactCheck] = None
-    function_call: Optional[AlfFunctionCall] = None
-
-class AlfLog(BaseModel):
+    fact_check: Optional[ALFFactCheck] = None
+    function_call: Optional[ALFFunctionCall] = None
+    language: Optional[str] = None
+    
+class ALFChat(BaseModel):
     """
-    A log is a single sequence of turns between a user and a bot.
+    A chat is a single sequence of turns between a user and a bot.
     Determined by Chat ID
     """
     channel_id: str
     chat_id: str
-    turns: list[AlfTurn]
+    logs: list[ALFLog]
     feedback: Optional[str] = None

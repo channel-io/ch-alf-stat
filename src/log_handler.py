@@ -5,8 +5,9 @@ from logging import getLogger
 from tqdm import tqdm
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
-from src.model import AlfLog, AlfTurn, AlfFactCheck, AlfFunctionCall
+from src.model import ALFLog, ALFChat, ALFFactCheck, ALFFunctionCall
 from pymongo import MongoClient
+from src.utils import detect_language
 logger = getLogger(__name__)
 
 
@@ -40,7 +41,7 @@ class LogHandler:
         self.end_date = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
         self.raw_logs = self._load_logs()
         self.chat_ids = self._get_chat_ids()
-        self.logs = self.preprocess_logs()
+        self.chats, self.logs = self.preprocess_logs()
 
     def _load_logs(self):
         if self.channel_id:
@@ -96,19 +97,19 @@ class LogHandler:
         return list(chat_ids)
     
 
-    def preprocess_logs(self) -> List[AlfLog]:
+    def preprocess_logs(self) -> List[ALFLog]:
         """
-        This function preprocesses the data by grouping it by chat_id and converting it to AlfLog objects with AlfTurn items.
+        This function preprocesses the data by grouping it by chat_id and converting it to ALFLog objects with ALFLog items.
         
         It iterates through the data logs and organizes them into a dataset dictionary where each key is a chat_id
-        and each value is an AlfLog object.
+        and each value is an ALFLog object.
         """
         raw_dataset = {}
 
         for item in self.raw_logs:
             chat_id = item["generate_answer"]["request"]["chat_id"]
             if chat_id not in raw_dataset:
-                raw_dataset[chat_id] = {"turns": [], "feedback": None}
+                raw_dataset[chat_id] = {"logs": [], "feedback": None}
             
             uid = item['metadata']['uid']
             if "utc_time_in" in item['metadata']:
@@ -150,7 +151,7 @@ class LogHandler:
                 if "references" in subitem["response"]:
                     references = [f"{r['type']}_{r['id']}" for r in subitem["response"]["references"]]
                 if "fact_check" in item:
-                    fact_check = AlfFactCheck(
+                    fact_check = ALFFactCheck(
                         is_fact=item["fact_check"]["response"]["is_fact"],
                         critic=item["fact_check"]["response"]["critic"],
                         rubric=item["fact_check"]["response"]["rubric"]
@@ -166,12 +167,12 @@ class LogHandler:
                 response_type = subitem["response"]["type"]
                 response = subitem["response"]["message"]
 
-            function_call = AlfFunctionCall(
+            function_call = ALFFunctionCall(
                 name=item["function call"]["name"],
                 arguments=item["function call"]["arguments"]
             )
             
-            alf_turn = AlfTurn(
+            alf_log = ALFLog(
                 uid=uid,
                 time_in=time_in,
                 time_out=time_out,
@@ -185,27 +186,31 @@ class LogHandler:
                 function_call=function_call,
                 fact_check=fact_check
             )
-            raw_dataset[chat_id]["turns"].append(alf_turn)
+            raw_dataset[chat_id]["logs"].append(alf_log)
 
         # Sort turns by time_in and determine if they were sent to the user
         if not self.channel_id:
             for _, chat_data in raw_dataset.items():
-                chat_data["turns"].sort(key=lambda x: x.time_in)
-                for i, turn in enumerate(chat_data["turns"]):
-                    turn.sent = all(turn.time_out <= next_turn.time_in for next_turn in chat_data["turns"][i+1:])
+                chat_data["logs"].sort(key=lambda x: x.time_in)
+                for i, alf_log in enumerate(chat_data["logs"]):
+                    alf_log.sent = all(alf_log.time_out <= next_alf_log.time_in for next_alf_log in chat_data["logs"][i+1:])
 
         # Convert to AlfLog and AlfTurn models
-        processed_dataset = []
+        chats = []
         for chat_id, chat_data in raw_dataset.items():
             channel_id = self.channel_id or "local"
-            alf_log = AlfLog(
+            alf_chat = ALFChat(
                 channel_id=channel_id,
                 chat_id=chat_id,
-                turns=chat_data["turns"]
+                logs=chat_data["logs"]
             )
-            processed_dataset.append(alf_log)
+            chats.append(alf_chat)
             
-        return processed_dataset
+        logs = []
+        for alf_chat in chats:
+            logs.extend(alf_chat.logs)
+            
+        return chats, logs
 
 
     def split_data_by_response_type(self):
@@ -216,12 +221,10 @@ class LogHandler:
         turns_fc = []
         
         for alf_log in self.logs:
-            for turn in alf_log.turns:
-                if turn.sent:  # Filter out responses that are not sent to user
-                    if turn.with_knowledge:
-                        turns_kb.append(turn)
-                    else:
-                        turns_fc.append(turn)
+            if alf_log.with_knowledge and alf_log.sent:
+                turns_kb.append(alf_log)
+            else:
+                turns_fc.append(alf_log)
                         
         turns_kb.sort(key=lambda x: x.time_in)
         turns_fc.sort(key=lambda x: x.time_in)
@@ -237,16 +240,22 @@ class LogHandler:
         - Handed to human within 24 hours.
         """
         unsatisfied_chats = set()
-        for chat_id, alf_log in self.dataset.items():
-            turns = alf_log.turns
-            if turns and turns[-1].response_type == 'open_chat':
-                for turn in turns:
-                    if turn.sent and turn.response_type in ['faq', 'rag']:
-                        if datetime.strptime(turns[-1].time_in, "%Y-%m-%d %H:%M:%S.%f%z") - datetime.strptime(turn.time_in, "%Y-%m-%d %H:%M:%S.%f%z") < timedelta(hours=24):
-                            unsatisfied_chats.add(chat_id)
+        for alf_chat in self.chats:
+            alf_logs = alf_chat.logs
+            if alf_logs and alf_logs[-1].response_type == 'open_chat':
+                for alf_log in alf_logs:
+                    if alf_log.sent and alf_log.response_type in ['faq', 'rag']:
+                        if datetime.strptime(alf_log.time_in, "%Y-%m-%d %H:%M:%S.%f%z") - datetime.strptime(alf_log.time_in, "%Y-%m-%d %H:%M:%S.%f%z") < timedelta(hours=24):
+                            unsatisfied_chats.add(alf_chat.chat_id)
                             break
                             
         unsatisfied_logs = {k: v for k, v in self.dataset.items() if k in unsatisfied_chats}
         logger.info(f"Number of unsatisfied chats: {len(unsatisfied_logs)}")
         return unsatisfied_logs
     
+    def detect_language(self):
+        """
+        Detect the language of the chat.
+        """
+        for alf_log in self.logs:
+            alf_log.language = detect_language(alf_log.summary)
