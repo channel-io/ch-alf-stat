@@ -30,7 +30,8 @@ class ALFLog(BaseModel):
     sent: bool = False
     fact_check: Optional[ALFFactCheck] = None
     function_call: Optional[ALFFunctionCall] = None
-
+    language: Optional[str] = None
+    
 class ALFChat(BaseModel):
     """
     A chat is a single sequence of turns between a user and a bot.

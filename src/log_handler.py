@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 from src.model import ALFLog, ALFChat, ALFFactCheck, ALFFunctionCall
 from pymongo import MongoClient
+from src.utils import detect_language
 logger = getLogger(__name__)
 
 
@@ -252,3 +253,9 @@ class LogHandler:
         logger.info(f"Number of unsatisfied chats: {len(unsatisfied_logs)}")
         return unsatisfied_logs
     
+    def detect_language(self):
+        """
+        Detect the language of the chat.
+        """
+        for alf_log in self.logs:
+            alf_log.language = detect_language(alf_log.summary)
