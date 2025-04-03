@@ -59,7 +59,11 @@ def main(
     clusters = clustering.clusters
 
     print(f"Found {len(clusters)} clusters")
-    Clustering.save_clusters(clusters, "script/clusters_ko_hdbscan.json")
+    print(f"Found {len([cluster for cluster in clusters if cluster.count > 10])} clusters with more than 10 logs")
+
+    # Evaluate clusters
+    metrics = Clustering.evaluate_clusters(clusters)
+    print(metrics)
     
     topic_model = ALFTopicModel(clusters, model="gpt-4o")
     keywords = topic_model.extract_keywords(clusters[0], n_keywords=10)

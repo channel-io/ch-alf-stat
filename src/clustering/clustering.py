@@ -81,3 +81,51 @@ class Clustering(ABC):
             })
         with open(path, "w", encoding="utf-8") as f:
             json.dump(cluster_dict, f, ensure_ascii=False, indent=4)
+
+    @staticmethod
+    def evaluate_clusters(clusters: list[Cluster]) -> dict:
+        """
+        Calculate clustering evaluation metrics for the provided clusters.
+        
+        This method calculates the Silhouette Score, Davies-Bouldin Index, and
+        Calinski-Harabasz Index for the clustering result. These metrics help evaluate
+        the quality of the clustering.
+        
+        Args:
+            clusters: List of Cluster objects containing the clustering results
+            
+        Returns:
+            dict: Dictionary containing the calculated metrics
+        """
+        from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
+        
+        # Extract data points and cluster labels
+        all_data = []
+        labels = []
+        
+        for cluster in clusters:
+            all_data.append(cluster.data)
+            cluster_labels = [cluster.id] * len(cluster.data)
+            labels.extend(cluster_labels)
+        
+        # Combine all data points
+        X = np.vstack(all_data)
+        labels = np.array(labels)
+        
+        # Calculate metrics
+        metrics = {}
+        
+        # Only calculate if there are more than one cluster
+        if len(clusters) > 1:
+            # Silhouette Score (higher is better, range: -1 to 1)
+            metrics["silhouette_score"] = float(silhouette_score(X, labels))
+            # Davies-Bouldin Index (lower is better)
+            metrics["davies_bouldin_score"] = float(davies_bouldin_score(X, labels))
+            # Calinski-Harabasz Index (higher is better)
+            metrics["calinski_harabasz_score"] = float(calinski_harabasz_score(X, labels))
+        else:
+            metrics["silhouette_score"] = None
+            metrics["davies_bouldin_score"] = None
+            metrics["calinski_harabasz_score"] = None
+            
+        return metrics
