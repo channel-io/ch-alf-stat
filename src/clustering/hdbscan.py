@@ -86,9 +86,6 @@ class HdbscanClustering(Clustering):
             cluster.sort()  # Sort the cluster data by distance to centroid
             self.clusters.append(cluster)
             
-        # Sort clusters by size (descending)
-        self.clusters.sort(key=lambda x: x.count, reverse=True)
-        
         # Reassign IDs based on sorted order
         for i, cluster in enumerate(self.clusters):
             cluster.id = i
@@ -111,3 +108,9 @@ class HdbscanClustering(Clustering):
         # HDBSCAN doesn't have a native predict method, so we need to use approximate_predict
         labels, strengths = hdbscan.approximate_predict(self.model, X)
         return labels
+
+    def sort(self):
+        # Sort clusters by size (descending)
+        self.clusters.sort(key=lambda x: x.count, reverse=True)
+        for cluster in self.clusters:
+            cluster.sort()
