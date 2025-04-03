@@ -15,7 +15,7 @@ from src.log_handler import LogHandler
 from src.clustering import *
 from src.embedder import EmbeddingExtractor
 from src.clustering.utils import reduce_dimensions
-
+from src.topic_model import ALFTopicModel
 
 def main(
     logs_dir: str,
@@ -26,7 +26,8 @@ def main(
 ):
     # Prepare dataset
     log_handler = LogHandler(logs_dir, subdirs, start_date, end_date)
-    logs = [t for t in log_handler.logs if t.with_knowledge and t.sent]
+    log_handler.detect_language()
+    logs = [t for t in log_handler.logs if t.with_knowledge and t.sent and t.language == "ko"]
     summaries = [t.summary for t in logs]
     
     # Handle empty summaries case
@@ -35,7 +36,7 @@ def main(
         return
 
     # Embed dataset
-    if os.path.exists(cache_dir):
+    if cache_dir and os.path.exists(cache_dir):
         X = torch.load(cache_dir, weights_only=False)
         X = np.array(X)
     else:
@@ -43,18 +44,26 @@ def main(
         try:
             X = loop.run_until_complete(EmbeddingExtractor.async_get_embeddings(summaries))
             X = reduce_dimensions(X, method="umap", n_components=64)
-            torch.save(X, cache_dir)
         finally:
             loop.close()    
+            if cache_dir:
+                torch.save(X, cache_dir)
 
     # Cluster dataset
     clustering = HdbscanClustering(
         X=X,
         logs=logs
     )
-    clusters = clustering.fit()
+    clustering.fit()
+    clustering.sort()
+    clusters = clustering.clusters
 
     print(f"Found {len(clusters)} clusters")
+    Clustering.save_clusters(clusters, "script/clusters_ko_hdbscan.json")
+    
+    topic_model = ALFTopicModel(clusters, model="gpt-4o")
+    keywords = topic_model.extract_keywords(clusters[0], n_keywords=10)
+    print(keywords)
 
 
 if __name__ == "__main__":
@@ -66,5 +75,5 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default=None)
     args = parser.parse_args()
     
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO) 
     main(**vars(args))
